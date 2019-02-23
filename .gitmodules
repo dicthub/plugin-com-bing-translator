@@ -1,0 +1,3 @@
+[submodule "plugin-shared-utility"]
+	path = plugin-shared-utility
+	url = https://github.com/dicthub/plugin-shared-utility
