@@ -1,6 +1,9 @@
 package org.dicthub.plugin.com_bing_translator
 
 import org.dicthub.plugin.shared.util.*
+import org.w3c.dom.get
+import org.w3c.dom.set
+import kotlin.browser.localStorage
 import kotlin.js.Json
 import kotlin.js.Promise
 import kotlin.js.json
@@ -35,7 +38,40 @@ class BingTranslationProvider constructor(
     override fun translate(query: Query): Promise<String> {
 
         return Promise { resolve, _ ->
+            translateUsingCachedToken(query).then(resolve).catch {
+                translateUsingNewToken(query).then(resolve)
+            }
+        }
+    }
+
+    private val tokenStorageKey = "plugin-bing-token"
+    private fun translateUsingCachedToken(query: Query): Promise<String> {
+        return Promise { resolve, reject ->
+            localStorage[tokenStorageKey]?.let {  token ->
+                console.info("Translate using cached bing token $token")
+                getQuickTranslation(query)(token).map { parseQuickTranslation(it) }.then { quickTranslation ->
+                    getDetailTranslation(query)(token).map { parseDetailTranslation(it) }.then { details ->
+                        val t = BingTranslation(
+                                from = bingLangCode(query.getFrom()),
+                                to = bingLangCode(query.getTo()),
+                                query = query.getText(),
+                                queryVoice = voiceUrl(token, query.getText(), bingLangCode(query.getFrom())),
+                                translation = quickTranslation,
+                                translationVoice = voiceUrl(token, quickTranslation, bingLangCode(query.getTo())),
+                                details = details
+                        )
+                        resolve(renderer.render(t))
+                    }.catch(reject)
+                }.catch(reject)
+            } ?: reject(IllegalStateException("NO cached token available"))
+        }
+    }
+
+    private fun translateUsingNewToken(query: Query): Promise<String> {
+        return Promise { resolve, _ ->
             newTokenPromise(httpClient).then { token ->
+                console.info("Translate using new bing token $token")
+                localStorage[tokenStorageKey] = token
                 getQuickTranslation(query)(token).map { parseQuickTranslation(it) }.then { quickTranslation ->
                     getDetailTranslation(query)(token).map { parseDetailTranslation(it) }.then { details ->
                         val t = BingTranslation(
@@ -78,7 +114,11 @@ class BingTranslationProvider constructor(
 
     @Suppress("UNCHECKED_CAST")
     private fun parseDetailTranslation(result: String): List<Detail> {
-        val translations = JSON.parse<Json>(result)["translations"] as? Array<Json> ?: return emptyList()
+        val translations = try {
+            JSON.parse<Json>(result)["translations"] as? Array<Json> ?: return emptyList()
+        } catch (e: Throwable) {
+            return emptyList()
+        }
         return translations.groupBy { it["posTag"] }.entries.map { pocGroup ->
             val poc = pocGroup.key as String
             val meanings = pocGroup.value.map { data ->
@@ -158,6 +198,6 @@ private val langCodeMap = json(
 
 private fun bingLangCode(langCode: String) = langCodeMap[langCode] as? String ?: langCode
 
-private fun sourceUrl(q: Query) = "$BASE_URL/#${bingLangCode(q.getFrom())}/${bingLangCode(q.getTo())}/${q.getText()}"
+private fun sourceUrl(q: Query) = "$BASE_URL/?from=${bingLangCode(q.getFrom())}&to=${bingLangCode(q.getTo())}&text=${q.getText()}"
 
 external fun encodeURIComponent(str: String): String
