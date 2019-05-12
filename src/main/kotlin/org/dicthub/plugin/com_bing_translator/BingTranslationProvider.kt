@@ -4,14 +4,11 @@ import org.dicthub.plugin.shared.util.*
 import org.w3c.dom.get
 import org.w3c.dom.set
 import kotlin.browser.localStorage
-import kotlin.js.Json
-import kotlin.js.Promise
-import kotlin.js.json
+import kotlin.js.*
 
 
 const val ID = "plugin-com-bing-translator"
 
-const val BASE_URL = "https://www.bing.com/translator"
 
 class BingTranslationProvider constructor(
         private val httpClient: HttpAsyncClient,
@@ -37,77 +34,83 @@ class BingTranslationProvider constructor(
 
     override fun translate(query: Query): Promise<String> {
 
-        return Promise { resolve, _ ->
-            translateUsingCachedToken(query).then(resolve).catch {
-                translateUsingNewToken(query).then(resolve)
+        val translateWithNewToken = fun(resolve: (String) -> Unit) {
+            getBingContext().then { newContext ->
+                console.info("Translated using new BingContext: ${newContext.domain}, ${newContext.token}")
+                saveContextToCache(newContext)
+                translateWithContext(newContext, query, true).then(resolve)
             }
         }
-    }
 
-    private val tokenStorageKey = "plugin-bing-token"
-    private fun translateUsingCachedToken(query: Query): Promise<String> {
-        return Promise { resolve, reject ->
-            localStorage[tokenStorageKey]?.let {  token ->
-                console.info("Translate using cached bing token $token")
-                getQuickTranslation(query)(token).map { parseQuickTranslation(it) }.then { quickTranslation ->
-                    getDetailTranslation(query)(token).map { parseDetailTranslation(it) }.then { details ->
-                        val t = BingTranslation(
-                                from = bingLangCode(query.getFrom()),
-                                to = bingLangCode(query.getTo()),
-                                query = query.getText(),
-                                queryVoice = voiceUrl(token, query.getText(), bingLangCode(query.getFrom())),
-                                translation = quickTranslation,
-                                translationVoice = voiceUrl(token, quickTranslation, bingLangCode(query.getTo())),
-                                details = details
-                        )
-                        resolve(renderer.render(t))
-                    }.catch(reject)
-                }.catch(reject)
-            } ?: reject(IllegalStateException("NO cached token available"))
-        }
-    }
-
-    private fun translateUsingNewToken(query: Query): Promise<String> {
         return Promise { resolve, _ ->
-            newTokenPromise(httpClient).then { token ->
-                console.info("Translate using new bing token $token")
-                localStorage[tokenStorageKey] = token
-                getQuickTranslation(query)(token).map { parseQuickTranslation(it) }.then { quickTranslation ->
-                    getDetailTranslation(query)(token).map { parseDetailTranslation(it) }.then { details ->
-                        val t = BingTranslation(
-                                from = bingLangCode(query.getFrom()),
-                                to = bingLangCode(query.getTo()),
-                                query = query.getText(),
-                                queryVoice = voiceUrl(token, query.getText(), bingLangCode(query.getFrom())),
-                                translation = quickTranslation,
-                                translationVoice = voiceUrl(token, quickTranslation, bingLangCode(query.getTo())),
-                                details = details
-                        )
-                        resolve(renderer.render(t))
-                    }.catch {
-                        resolve(renderFailure(id(), sourceUrl(query), query, it))
-                    }
-                }.catch {
-                    resolve(renderFailure(id(), sourceUrl(query), query, it))
+            loadCachedContext()?.let { cachedContext ->
+                // Try cached token first; if failed try to refresh and get a new token
+                translateWithContext(cachedContext, query, false).then(resolve).catch {
+                    translateWithNewToken(resolve)
                 }
-            }.catch {
-                resolve(renderFailure(id(), sourceUrl(query), query, it))
+            } ?: run {
+                translateWithNewToken(resolve)
             }
         }
     }
 
-    private fun voiceUrl(token: String, text: String, lang: String) =
-            "https://www.bing.com/tspeak?&format=audio%2Fmp3&language=${bingLangCode(lang)}&IG=$token&IID=translator.5038.1&options=female&text=${encodeURIComponent(text)}"
+    private val domainStorageKey = "plugin-bing-domain"
+    private val tokenStorageKey = "plugin-bing-token"
 
-    private fun getQuickTranslation(query: Query) = { ig: String ->
-        httpClient.post("https://www.bing.com/ttranslate?&category=&IG=$ig&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
-                buildFormData(query.getFrom(), query.getTo(), query.getText()))
+    private fun loadCachedContext(): BingContext? {
+        val domain = localStorage[domainStorageKey] ?: return null
+        val token = localStorage[tokenStorageKey] ?: return null
+        console.info("Translated using cached BingContext: $domain, $token")
+        return BingContext(domain = domain, token = token)
     }
 
-    private fun getDetailTranslation(query: Query) = { ig: String ->
-        httpClient.post("https://www.bing.com/ttranslationlookup?&IG=$ig&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
-                buildFormData(query.getFrom(), query.getTo(), query.getText()))
+    private fun saveContextToCache(context: BingContext) {
+        localStorage[domainStorageKey] = context.domain
+        localStorage[tokenStorageKey] = context.token
     }
+
+    private fun translateWithContext(context: BingContext, query: Query, renderFailureMessage: Boolean): Promise<String> {
+        val quickTranslation = getQuickTranslation(context, query).convert { parseQuickTranslation(it) }
+        val detailTranslation = getDetailTranslation(context, query).convert { parseDetailTranslation(it) }
+
+        val sourceUrl = sourceUrl(context, query)
+
+        return Promise { resolve, reject ->
+            allPromises(quickTranslation, detailTranslation).then {
+                val t = BingTranslation(
+                        sourceUrl = sourceUrl,
+                        from = bingLangCode(query.getFrom()),
+                        to = bingLangCode(query.getTo()),
+                        query = query.getText(),
+                        queryVoice = voiceUrl(context, query.getText(), bingLangCode(query.getFrom())),
+                        translation = it.first,
+                        translationVoice = voiceUrl(context, it.first, bingLangCode(query.getTo())),
+                        details = it.second
+                )
+                resolve(renderer.render(t))
+            }.catch {
+                if (renderFailureMessage) {
+                    resolve(renderFailure(id(), sourceUrl(context, query), query, it))
+                } else {
+                    reject(it)
+                }
+            }
+        }
+    }
+
+    private fun sourceUrl(context: BingContext, q: Query) =
+            "https://${context.domain}/translate/?from=${bingLangCode(q.getFrom())}&to=${bingLangCode(q.getTo())}&text=${q.getText()}"
+
+    private fun voiceUrl(context: BingContext, text: String, lang: String) =
+            "https://${context.domain}/tspeak?&format=audio%2Fmp3&language=${bingLangCode(lang)}&IG=${context.token}&IID=translator.5038.1&options=female&text=${encodeURIComponent(text)}"
+
+    private fun getQuickTranslation(context: BingContext, query: Query) =
+            httpClient.post("https://${context.domain}/ttranslate?&category=&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+                    buildFormData(query.getFrom(), query.getTo(), query.getText()))
+
+    private fun getDetailTranslation(context: BingContext, query: Query) =
+            httpClient.post("https://${context.domain}/ttranslationlookup?&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+                    buildFormData(query.getFrom(), query.getTo(), query.getText()))
 
     private fun parseQuickTranslation(result: String) =
             JSON.parse<Json>(result)["translationResponse"].toString()
@@ -197,7 +200,5 @@ private val langCodeMap = json(
 
 
 private fun bingLangCode(langCode: String) = langCodeMap[langCode] as? String ?: langCode
-
-private fun sourceUrl(q: Query) = "$BASE_URL/?from=${bingLangCode(q.getFrom())}&to=${bingLangCode(q.getTo())}&text=${q.getText()}"
 
 external fun encodeURIComponent(str: String): String

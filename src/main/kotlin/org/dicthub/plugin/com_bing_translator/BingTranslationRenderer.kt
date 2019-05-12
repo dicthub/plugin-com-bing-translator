@@ -71,10 +71,8 @@ class BingTranslationRenderer {
             }
         }
 
-        renderSource(container, sourceUrl(t), builtinSourceIcon(ID))
+        renderSource(container, t.sourceUrl, builtinSourceIcon(ID))
 
         return stringBuilder.toString()
     }
-
-    private fun sourceUrl(t: BingTranslation) = "$BASE_URL/?from=${t.from}&to=${t.to}&text=${t.query}"
 }

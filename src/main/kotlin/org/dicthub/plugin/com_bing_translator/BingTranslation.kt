@@ -1,6 +1,7 @@
 package org.dicthub.plugin.com_bing_translator
 
 data class BingTranslation(
+        val sourceUrl: String,
         val from: String,
         val to: String,
         val query: String,
