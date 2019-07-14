@@ -105,23 +105,25 @@ class BingTranslationProvider constructor(
             "https://${context.domain}/tspeak?&format=audio%2Fmp3&language=${bingLangCode(lang)}&IG=${context.token}&IID=translator.5038.1&options=female&text=${encodeURIComponent(text)}"
 
     private fun getQuickTranslation(context: BingContext, query: Query) =
-            httpClient.post("https://${context.domain}/ttranslate?&category=&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+            httpClient.post("https://${context.domain}/ttranslatev3?isVertical=1&category=&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
                     buildFormData(query.getFrom(), query.getTo(), query.getText()))
 
     private fun getDetailTranslation(context: BingContext, query: Query) =
-            httpClient.post("https://${context.domain}/ttranslationlookup?&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+            httpClient.post("https://${context.domain}/tlookupv3?isVertical=1&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
                     buildFormData(query.getFrom(), query.getTo(), query.getText()))
 
     private fun parseQuickTranslation(result: String) =
-            JSON.parse<Json>(result)["translationResponse"].toString()
+            JSON.parse<Array<Json>>(result).getOrNull(0)?.get("translations")?.let { it as? Array<Json> }
+                    ?.getOrNull(0)?.get("text")?.toString() ?: throw TranslationNotFoundException()
 
     @Suppress("UNCHECKED_CAST")
     private fun parseDetailTranslation(result: String): List<Detail> {
         val translations = try {
-            JSON.parse<Json>(result)["translations"] as? Array<Json> ?: return emptyList()
+            JSON.parse<Array<Json>>(result).getOrNull(0)?.get("translations") as? Array<Json> ?: return emptyList()
         } catch (e: Throwable) {
             return emptyList()
         }
+
         return translations.groupBy { it["posTag"] }.entries.map { pocGroup ->
             val poc = pocGroup.key as String
             val meanings = pocGroup.value.map { data ->
