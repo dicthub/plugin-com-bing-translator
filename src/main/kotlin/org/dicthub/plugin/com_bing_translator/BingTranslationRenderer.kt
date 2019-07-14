@@ -22,12 +22,12 @@ class BingTranslationRenderer {
                 strong {
                     +t.query
                 }
-                +" "
-                span(classes = "translation-voice") {
-                    audio {
-                        src = t.queryVoice
-                    }
-                }
+//                +" "
+//                span(classes = "translation-voice") {
+//                    audio {
+//                        src = t.queryVoice
+//                    }
+//                }
             }
 
             ul(classes = "list-group") {
@@ -36,12 +36,12 @@ class BingTranslationRenderer {
                         +"[${t.to}]"
                     }
                     +t.translation
-                    +" "
-                    span(classes = "translation-voice") {
-                        audio {
-                            src = t.translationVoice
-                        }
-                    }
+//                    +" "
+//                    span(classes = "translation-voice") {
+//                        audio {
+//                            src = t.translationVoice
+//                        }
+//                    }
 
                     if (t.details.isNotEmpty()) {
                         val detailId = "googleTranslationDetail${Random.nextInt()}"
