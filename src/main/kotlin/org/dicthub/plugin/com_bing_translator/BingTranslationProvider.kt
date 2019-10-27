@@ -105,8 +105,8 @@ class BingTranslationProvider constructor(
             "https://${context.domain}/tspeak?&format=audio%2Fmp3&language=${bingLangCode(lang)}&IG=${context.token}&IID=translator.5038.1&options=female&text=${encodeURIComponent(text)}"
 
     private fun getQuickTranslation(context: BingContext, query: Query) =
-            httpClient.post("https://${context.domain}/ttranslatev3?isVertical=1&category=&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
-                    buildFormData(query.getFrom(), query.getTo(), query.getText()))
+            httpClient.post("https://${context.domain}/ttranslatev3?isVertical=1&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+                    buildQueryData(query.getFrom(), query.getTo(), query.getText()))
 
     private fun getDetailTranslation(context: BingContext, query: Query) =
             httpClient.post("https://${context.domain}/tlookupv3?isVertical=1&IG=${context.token}&IID=translator.5038.1", mapOf("Content-Type" to "application/x-www-form-urlencoded"),
@@ -135,6 +135,9 @@ class BingTranslationProvider constructor(
             Detail(poc = poc, meanings = meanings)
         }
     }
+
+    private fun buildQueryData(from: String, to: String, query: String) =
+            "fromLang=${bingLangCode(from)}&to=${bingLangCode(to)}&text=${encodeURIComponent(query)}"
 
     private fun buildFormData(from: String, to: String, query: String) =
             "from=${bingLangCode(from)}&to=${bingLangCode(to)}&text=${encodeURIComponent(query)}"
@@ -196,8 +199,8 @@ private val langCodeMap = json(
         "uk" to "uk",
         "ur" to "ur",
         "vi" to "vi",
-        "zh-CN" to "zh-CHS",
-        "zh-TW" to "zh-CHT"
+        "zh-CN" to "zh-Hans",
+        "zh-TW" to "zh-Hant"
 )
 
 
